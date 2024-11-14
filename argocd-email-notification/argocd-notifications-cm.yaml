@@ -7,7 +7,7 @@ data:
     argocdUrl: https://172.17.18.185/applications
   service.email.custom: |
     username: argocduser
-    password: HiY51Tdt0f4KOkwX
+    password: HiY514KOkwX
     host: mail.smtp2go.com
     port: 587
     from: notification@kcddhaka.org
