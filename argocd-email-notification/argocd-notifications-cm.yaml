@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: argocd-notifications-cm
+  namspace: argocd
 data:
   context: |
     argocdUrl: https://172.17.18.185/applications
