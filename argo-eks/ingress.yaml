@@ -1,34 +1,36 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
+  name: argocd-alb
+  namespace: argocd
   annotations:
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:699475925713:certificate/d4dafacf-0e17-43a1-a7fe-300c26bf7297
-    alb.ingress.kubernetes.io/conditions.argogrpc: |
-      [{"field":"http-header","httpHeaderConfig":{"httpHeaderName": "Content-Type", "values":["application/grpc"]}}]
+    kubernetes.io/ingress.class: alb
+
+    alb.ingress.kubernetes.io/group.name: shared-alb
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:045672142170:certificate/1e67ad1c-8bc3-4a0d-93aa-f171334012b4
     alb.ingress.kubernetes.io/backend-protocol: HTTPS
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
     alb.ingress.kubernetes.io/scheme: internet-facing
-  labels:
-    app: alb-ingress-controller
-  name: argocd-alb
-  namespace: argocd
+    alb.ingress.kubernetes.io/conditions.argogrpc: |
+      [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"Content-Type","values":["application/grpc"]}}]
 spec:
   ingressClassName: alb
-  rules:  
-  - host: argocd.example.com
-    http:
-      paths:
-        - path: /
-          backend:
-            service:
-              name: argogrpc
-              port:
-                number: 443
-          pathType: Prefix
-        - path: /
-          backend:
-            service:
-              name: argocd-server
-              port:
-                number: 443
-          pathType: Prefix
+  rules:
+    - host: argocd.nasirtechtalks.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argogrpc
+                port:
+                  number: 443
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port:
+                  number: 443
