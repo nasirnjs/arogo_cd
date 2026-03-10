@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: kinder-app-project
+  namespace: argocd
+spec:
+  sourceRepos:
+    - '*'  # any repo allowed
+  destinations:
+    - namespace: kinder-app
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
