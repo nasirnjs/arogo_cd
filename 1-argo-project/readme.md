@@ -48,3 +48,8 @@ spec:
     - group: "*"
       kind: "*"
 ```
+
+
+```bash
+argocd proj list
+```

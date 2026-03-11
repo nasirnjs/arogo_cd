@@ -7,14 +7,14 @@
 - Repo: `https://github.com/my-org/private-app.git`
 - GitHub username: `myuser`
 - Personal Access Token (PAT) as password: `ghp_ABC123XYZ`
-- Project: `my-specific-project`
+- Project: `kinder-app-project`
 
 **Command:**
 ```bash
-argocd repo add https://github.com/my-org/private-app.git \
-  --username myuser \
-  --password ghp_ABC123XYZ \
-  --project my-specific-project
+argocd repo add https://github.com/nasirnjs/kinder-ci-k8s.git \
+  --username nasirnjs \
+  --password ghp_xxxxxxxxxxxxxx \
+  --project kinder-app-project
 ```
 
 **Verify the repo:**
@@ -22,20 +22,12 @@ argocd repo add https://github.com/my-org/private-app.git \
 argocd repo list
 ```
 
-**Example Output:**
-```
-REPO URL                                    TYPE    PROJECT
-https://github.com/my-org/private-app.git   git     my-specific-project
-```
 
-> ✅ Only apps in `my-specific-project` can use this repo.
-
-
-## 2️⃣ Adding a Private Repo via SSH
+## Adding a Private Repo via SSH
 
 ### Step 1: Generate SSH Key
 ```bash
-ssh-keygen -t ed25519 -C "argocd@company" -f ~/.ssh/id_ed25519_argocd
+ssh-keygen -t ed25519 -C "nasirnjs@gmail.com" -f ~/.ssh/id_ed25519_argocd
 ```
 
 ```bash
@@ -48,22 +40,36 @@ ssh-keygen -t ed25519 -C "argocd@company" -f ~/.ssh/id_ed25519_argocd
 - GitLab: **Settings → Repository → Deploy keys → Add key**
 - Paste contents of `~/.ssh/id_ed25519_argocd.pub`
 
+
 ### Step 3: Add Repo to Argo CD
-```bash
-argocd repo add git@github.com:my-org/private-app.git \
-  --ssh-private-key-path ~/.ssh/id_ed25519_argocd \
-  --project my-specific-project
-```
 
 **Verify the repo:**
 ```bash
-argocd repo list
+argocd proj list
 ```
 
-**Example Output:**
-```
-REPO URL                               TYPE    PROJECT
-git@github.com:my-org/private-app.git  git     my-specific-project
+```bash
+argocd repo add git@github.com:nasirnjs/kinder-ci-k8s.git \
+  --ssh-private-key-path ~/.ssh/id_ed25519_argocd \
+  --project kinder-app-project
 ```
 
-> ✅ Only apps in `my-specific-project` can use this repo.
+## Create Application
+
+```bash
+argocd app create kinder-app \
+  --repo git@github.com:nasirnjs/kinder-ci-k8s.git \
+  --path . \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace kinder \
+  --project kinder-app-project
+```
+
+Sync Your Application
+```bash
+argocd app sync kinder-app
+```
+ArgoCD application kinder-app is deployed or not !
+```bash
+argocd app get kinder-app
+```
