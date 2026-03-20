@@ -102,3 +102,30 @@ spec:
       command: [cowsay]
       args: ["hello world"]
 ```
+
+# Directed Acyclic Graph (DAG)
+
+**What is it?**
+
+A Directed Acyclic Graph (DAG) is a visual model representing a sequence of tasks where:
+- Directed: Relationships flow one way (A → B means A must run before B).
+- Acyclic: No circular dependencies (you cannot loop back to a previous task).
+- Graph: Tasks are nodes; dependencies are the lines connecting them.
+
+**Why is it useful?**
+
+DAGs power modern orchestration tools (like Airflow or Argo Workflows) because they solve three big problems:
+- Order: Automatically ensures tasks run in the correct sequence based on dependencies.
+- Speed: Runs independent tasks in parallel automatically.
+- Resilience: If a task fails, you can retry only that task—not the whole pipeline.
+
+## Key Characteristics of DAG-based Workflows 
+
+- Directed: Tasks flow one way (A → B means A runs before B).
+- Acyclic: No loops or circular dependencies—workflow always ends.
+- Dependency-driven: Tasks only run when all upstream dependencies succeed.
+- Parallel execution: Independent tasks run simultaneously.
+- Deterministic: Same input always produces same execution order.
+- Fault isolation: Failures affect only specific tasks (retry without restarting whole pipeline).
+- Observability: Visual graph shows status of every task.
+- Topological order: Tasks execute in mathematically correct sequence.

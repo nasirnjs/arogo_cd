@@ -1,0 +1,13 @@
+# backend-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"          # Same wave as backend Deployment
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 8080
+    targetPort: 8080
