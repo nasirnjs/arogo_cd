@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: blue-green-app
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: blue-green-app
+  template:
+    metadata:
+      labels:
+        app: blue-green-app
+    spec:
+      containers:
+      - name: blue-green-container
+        image: nginx:1.23
+        ports:
+        - containerPort: 80
+  strategy:
+    blueGreen:
+      activeService: blue-green-app-active
+      previewService: blue-green-app-preview
+      autoPromotionEnabled: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-green-app-active
+  namespace: default
+spec:
+  selector:
+    app: blue-green-app
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-green-app-preview
+  namespace: default
+spec:
+  selector:
+    app: blue-green-app
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
