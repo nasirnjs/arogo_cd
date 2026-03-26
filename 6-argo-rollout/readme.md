@@ -198,3 +198,28 @@ kubectl argo rollouts set image blue-green-app blue-green-container=nginx
 kubectl argo rollouts get rollout blue-green-app --watch
 kubectl argo rollouts promote blue-green-app  # if manual promotion
 ```
+
+```yaml
+# Add Istio repo and update
+helm repo add istio https://istio-release.storage.googleapis.com/charts
+helm repo update
+
+# Install Istio base CRDs
+helm install istio-base istio/base --namespace istio-system --create-namespace
+
+# Install Istio control plane
+helm install istiod istio/istiod \
+  --namespace istio-system \
+  --wait --timeout 10m
+
+# Install Istio Ingress Gateway
+kubectl create namespace istio-ingress
+
+helm install istio-ingressgateway istio/gateway \
+  --namespace istio-ingress \
+  --wait --timeout 10m
+
+# Check pods & services
+kubectl get pods,svc -n istio-system
+kubectl get pods,svc -n istio-ingress
+```

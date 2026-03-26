@@ -1,0 +1,17 @@
+# ingress-values.yaml - For LoadBalancer with MetalLB
+service:
+  type: LoadBalancer
+  externalTrafficPolicy: Local        # Recommended with MetalLB (preserves source IP)
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
