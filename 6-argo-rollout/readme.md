@@ -117,6 +117,78 @@ Argo Rollouts introduces advanced deployment strategies with automation and metr
 
 
 
+## Argo Rollouts Canary with NGINX Ingress + HPA
+
+This guide provides a complete, production-style Canary Rollout using **Argo Rollouts**, **NGINX Ingress** for precise traffic splitting, and **Horizontal Pod Autoscaler (HPA)**.
+
+### Traffic Shift Strategy
+- Start with **20%** traffic to the new version (canary)
+- Increase to **50%** traffic to the new version
+- Finally promote to **100%** (full rollout)
+
+
+### Why Two Services?
+
+Even though both services (`demo-app-stable` and `demo-app-canary`) use the **same selector** (`app: demo-app`), Argo Rollouts makes them intelligent by dynamically managing the underlying ReplicaSets.
+
+- The Rollout creates **two ReplicaSets**:
+  - **Stable ReplicaSet** → runs the old (previous successful) version.
+  - **Canary ReplicaSet** → runs the new version.
+
+- Argo **automatically adds** a special label called `rollouts-pod-template-hash` to the pods of each ReplicaSet.  
+  This label is **different** for stable and canary pods.
+
+- Argo then **dynamically updates** the Service selectors behind the scenes:
+  - `demo-app-stable` Service only selects **stable pods**.
+  - `demo-app-canary` Service only selects **canary pods**.
+
+This smart behavior is handled automatically by the **Argo Rollouts controller** — you don’t need to manage it manually.
+
+### How Traffic Shifting Actually Works (with NGINX)
+
+1. Your main **Ingress** (`demo-app-ingress`) always points to the **stable Service**.
+
+2. When a canary rollout starts (e.g., `setWeight: 20`):
+   - Argo **automatically creates** a second Ingress (usually named `demo-app-ingress-canary`).
+   - Argo adds NGINX-specific annotations to this canary Ingress:
+```yaml
+     nginx.ingress.kubernetes.io/canary: "true"
+     nginx.ingress.kubernetes.io/canary-weight: "20"
+```
+
+NGINX Ingress Controller reads both Ingresses and splits traffic:
+- 80% of traffic → demo-app-stable Service → old pods
+- 20% of traffic → demo-app-canary Service → new pods
+
+3. When you do setWeight: 50:
+- Argo updates the canary Ingress annotation to canary-weight: "50".
+- NGINX now splits traffic 50% / 50%.
+
+4. When you do setWeight: 100:
+Argo promotes the canary → the new version becomes the stable ReplicaSet.
+- The old stable ReplicaSet is scaled down.
+- The canary Ingress is automatically cleaned up.
+- All traffic now goes through the stable Service (which now serves the new version).
+
+
+### Key Intelligent Things Argo Does for You
+
+- **Dynamic pod selection**  
+  Argo adds/removes the hash label and updates Service endpoints automatically.
+
+- **Automatic canary Ingress management**  
+  Creates, updates, and deletes the canary Ingress with correct weights.
+
+- **`dynamicStableScale: true` (recommended)**  
+  Keeps the stable ReplicaSet scaled properly so it can handle the remaining traffic percentage without overload.
+
+- **Background analysis**  
+  Continuously checks metrics while traffic is being shifted.
+
+- **Pause steps**  
+  Gives you safe windows to observe before increasing traffic.
+
+
 ```bash
 kubectl argo rollouts get rollout blue-green-app
 ```

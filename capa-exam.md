@@ -64,8 +64,13 @@
 - [Core Concepts](#core-concepts-1)
   - [CI vs CD vs Progressive Delivery (PD)](#ci-vs-cd-vs-progressive-delivery-pd)
   - [Architecture Basics](#architecture-basics)
-  - [Common Progressive Rollout Strategies](#common-progressive-rollout-strategies)
-    - [1. Blue-Green Deployment](#1-blue-green-deployment)
+  - [Argo Rollouts Blue-Green Deployment Explained](#argo-rollouts-blue-green-deployment-explained)
+    - [1. What is Blue-Green Deployment in Argo Rollouts?](#1-what-is-blue-green-deployment-in-argo-rollouts)
+    - [2. Key Components in Your YAML](#2-key-components-in-your-yaml)
+    - [3. How Active vs Preview Service Works](#3-how-active-vs-preview-service-works)
+    - [4. Step-by-Step Flow When You Update the Image](#4-step-by-step-flow-when-you-update-the-image)
+    - [5. How Services Connect to the Pods](#5-how-services-connect-to-the-pods)
+    - [6. Important Points About Your Specific YAML](#6-important-points-about-your-specific-yaml)
     - [2. Canary Deployment](#2-canary-deployment)
     - [Key Fields in `strategy.canary`:](#key-fields-in-strategycanary)
     - [Argo Rollouts - Blue-Green vs Canary \& Analysis](#argo-rollouts---blue-green-vs-canary--analysis)
@@ -755,47 +760,144 @@ Argo Rollouts primarily enables **Progressive Delivery**.
 - **ReplicaSet & Pods**: Managed by the Rollout controller (adds version awareness).
 - Integrates with **Service**, **Ingress**, and **Service Meshes** for traffic shifting.
 
+
+### Argo Rollouts Blue-Green Deployment Explained
+
+Here's a clear, step-by-step explanation of how your Argo Rollouts Blue-Green deployment works, including the roles of active and preview services, and how everything connects.
+
+#### 1. What is Blue-Green Deployment in Argo Rollouts?
+
+Blue-Green is a zero-downtime deployment strategy.  
+You always have two versions of your app running at the same time (the old "blue" and the new "green").  
+Only one version receives real user (production) traffic at any moment.  
+You can fully test the new version before instantly switching all traffic to it.
+
+Argo Rollouts manages this automatically by controlling **ReplicaSets** (not normal Deployments) and by **dynamically updating the selectors** on your Services.
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: blue-green-app
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: blue-green-app
+  template:
+    metadata:
+      labels:
+        app: blue-green-app
+    spec:
+      containers:
+      - name: blue-green-container
+        image: nginx:1.23
+        ports:
+        - containerPort: 80
+  strategy:
+    blueGreen:
+      activeService: blue-green-app-active
+      previewService: blue-green-app-preview
+      autoPromotionEnabled: false
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-green-app-active
+  namespace: default
+spec:
+  selector:
+    app: blue-green-app
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-green-app-preview
+  namespace: default
+spec:
+  selector:
+    app: blue-green-app
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+```
 
-### Common Progressive Rollout Strategies
+#### 2. Key Components in Your YAML
 
-#### 1. Blue-Green Deployment
-Both old (Blue) and new (Green) versions are deployed at the same time.  
-Traffic is switched **all at once** from old to new after verification.  
-Old version is scaled down after the switch.
+| Component              | Name                        | Purpose |
+|------------------------|-----------------------------|---------|
+| Rollout                | blue-green-app              | The main resource (replaces a normal Deployment) |
+| Active Service         | blue-green-app-active       | Receives **production / live traffic** |
+| Preview Service        | blue-green-app-preview      | Used to **test the new version** before it goes live |
+| Pod Template Label     | app: blue-green-app         | All pods (old + new) get this label |
+
+Both services have **exactly the same selector** (`app: blue-green-app`) and the same `type: LoadBalancer`.
+
+#### 3. How Active vs Preview Service Works
+
+Argo Rollouts does **not** use the service selector the way a normal Kubernetes Service does.
+
+Instead, the Argo Rollouts controller **automatically adds a special label** (usually something like `rollouts-pod-template-hash`) to the pods of each ReplicaSet and then **updates the service selectors** to point to the correct hash.
+
+- **Active Service** (`blue-green-app-active`):  
+  Always points to the **current live version** (the "blue" or stable ReplicaSet).  
+  This is what your users / ingress / load balancer should point to.
+
+- **Preview Service** (`blue-green-app-preview`):  
+  Points to the **new version** (the "green" ReplicaSet) while it is being tested.  
+  You can access this service separately to do manual testing, smoke tests, canary traffic, etc., without affecting production.
+
+#### 4. Step-by-Step Flow When You Update the Image
+
+Let's say you change the image from `nginx:1.23` to `nginx:1.25` and apply the Rollout again.
+
+1. Argo Rollouts detects the change in `.spec.template`.
+2. It creates a **new ReplicaSet** (let's call it "green" – revision 2) with 3 replicas.
+3. The **preview service** is immediately updated to point to the new green pods.  
+   You can now visit the **preview LoadBalancer IP** and see the new nginx version.
+4. The **active service** continues pointing to the old blue pods (**no downtime**).
+5. The rollout **pauses** because you have `autoPromotionEnabled: false`.
+6. You test the preview service thoroughly (manual checks, automated tests, etc.).
+7. When you're happy, you **manually promote** the rollout using:
+```bash
+   kubectl argo rollouts promote blue-green-app
+```
+8. On Promotion
+- The active service is instantly updated to point to the **green pods**
+- All production traffic switches to the new version **atomically (zero downtime)**
+- After a short delay (`scaleDownDelaySeconds`, default: 30s), the old **blue ReplicaSet** is scaled down to 0
+
+#### 5. How Services Connect to the Pods
+Even though both services have the same selector in your YAML:
+```yaml
+selector:
+  app: blue-green-app
+```
+Argo Rollouts overrides this at runtime by adding a hash-based selector:
+
+- Active service selector becomes: app: blue-green-app, rollouts-pod-template-hash: <old-hash>
+- Preview service selector becomes: app: blue-green-app, rollouts-pod-template-hash: <new-hash>
+
+#### 6. Important Points About Your Specific YAML
+
+- `autoPromotionEnabled: false` → Manual promotion required (safe for production).
+- Both services are `type: LoadBalancer` → Each gets its own public IP (or cloud load balancer).
+- In real setups, people usually point their DNS / Ingress only to the active service.
+- Preview service is used only for testing (you can even make it `ClusterIP` if you don't need external access).
+- `Replicas: 3` → Both old and new versions will run with 3 pods during the transition.
+- No `scaleDownDelaySeconds` defined → Uses default (30 seconds).
+
 
 <p align="center">
   <img src="./image/blue-green-deployments.png" alt="ArgoCD Architecture " width="400" height="550"/>
 </p>
 
-**Use Case**: Applications where you want zero-downtime with clean cutover (e.g., stateful apps, databases).
-
-**Key Fields in `strategy.blueGreen`**:
-- `activeService`
-- `previewService`
-- `autoPromotionEnabled`
-- `prePromotionAnalysis` / `postPromotionAnalysis`
-- `scaleDownDelaySeconds`
-
-**Example YAML**:
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Rollout
-metadata:
-  name: my-app
-spec:
-  replicas: 5
-  strategy:
-    blueGreen:
-      activeService: my-app-active
-      previewService: my-app-preview
-      autoPromotionEnabled: false
-  template:
-    spec:
-      containers:
-      - name: my-app
-        image: my-app:v2.0
-```
 
 #### 2. Canary Deployment
 
