@@ -71,9 +71,16 @@
     - [4. Step-by-Step Flow When You Update the Image](#4-step-by-step-flow-when-you-update-the-image)
     - [5. How Services Connect to the Pods](#5-how-services-connect-to-the-pods)
     - [6. Important Points About Your Specific YAML](#6-important-points-about-your-specific-yaml)
-    - [2. Canary Deployment](#2-canary-deployment)
+  - [2. Canary Deployment](#2-canary-deployment)
     - [Key Fields in `strategy.canary`:](#key-fields-in-strategycanary)
-    - [Argo Rollouts - Blue-Green vs Canary \& Analysis](#argo-rollouts---blue-green-vs-canary--analysis)
+  - [Strategy Comparison](#strategy-comparison)
+  - [Key Implementation Notes](#key-implementation-notes)
+  - [Argo Rollouts Canary with NGINX Ingress + HPA](#argo-rollouts-canary-with-nginx-ingress--hpa)
+    - [Traffic Shift Strategy](#traffic-shift-strategy)
+  - [Why Two Services?](#why-two-services)
+  - [How Traffic Shifting Actually Works (with NGINX)](#how-traffic-shifting-actually-works-with-nginx)
+  - [Key Intelligent Things Argo Does for You](#key-intelligent-things-argo-does-for-you)
+  - [Argo Rollouts - Blue-Green vs Canary \& Analysis](#argo-rollouts---blue-green-vs-canary--analysis)
     - [Analysis \& Automated Verification](#analysis--automated-verification)
     - [AnalysisTemplate](#analysistemplate)
     - [AnalysisRun](#analysisrun)
@@ -899,7 +906,7 @@ Argo Rollouts overrides this at runtime by adding a hash-based selector:
 </p>
 
 
-#### 2. Canary Deployment
+### 2. Canary Deployment
 
 New version is released to a small percentage of users first. Traffic is gradually increased if the new version performs well.  If issues are found, traffic is reduced (rollback).
 
@@ -939,7 +946,126 @@ spec:
       - setWeight: 100
 ```
 
-#### Argo Rollouts - Blue-Green vs Canary & Analysis
+**Argo Rollouts Only**
+
+- Releases the new version to a **small subset of users** initially (e.g., 5-10% of traffic).
+- **Progressive traffic shifting**:
+  - Traffic is incrementally increased through defined steps (e.g., 10% → 25% → 50% → 100%).
+  - Each step can be gated by manual approval, automated metrics, or time-based pauses.
+
+- **Observability & automation**:
+  - Real-time metrics (latency, error rates, custom business KPIs) determine whether to proceed or rollback.
+  - If metrics degrade at any step, Argo Rollouts **automatically aborts** and rolls back.
+  - Analysis can run continuously in the background throughout the rollout.
+
+- **Fine-grained control**:
+  - **Step-based weights**: Define exact traffic percentages per step.
+  - **Manual gates**: Pause for human verification (e.g., QA sign-off, executive approval).
+  - **Duration pauses**: Wait a specified time between steps for smoke testing.
+  - **Traffic router flexibility**: Works with service meshes (Istio, Linkerd), ingress controllers (NGINX), or multiple Kubernetes Services.
+
+- **Best for**: High-risk applications, microservices with complex dependencies, or when you need to validate with real production traffic before full exposure.
+
+---
+
+### Strategy Comparison
+
+| Aspect | Rolling Update | Blue-Green | Canary |
+|--------|---------------|------------|--------|
+| **Traffic transition** | Gradual per pod | All-at-once | Progressive steps |
+| **Old version availability** | Replaced gradually | Fully available until promotion | Fully available until 100% |
+| **Rollback speed** | Moderate (pods roll back) | Instant (traffic flip) | Instant (traffic flip) |
+| **Production validation** | None | Full pre-validation | Incremental with real traffic |
+| **Infrastructure cost** | Low (single environment) | Higher (dual environments) | Moderate (traffic router overhead) |
+| **Complexity** | Low | Medium | High |
+| **Automation capability** | Minimal | Analysis-based promotion | Step-wise analysis & promotion |
+
+---
+
+### Key Implementation Notes
+
+- **Rolling Update** in Argo Rollouts adds capabilities not available in native Deployments: pause/resume, analysis hooks, and rollback to any previous revision.
+- **Blue-Green** requires either:
+  - Two distinct Kubernetes Services (active + preview) with traffic switched externally, or
+  - A single Service with label selectors flipped atomically.
+- **Canary** typically requires a **traffic router** (service mesh or ingress) for true weighted traffic splitting — Kubernetes Services alone don't support percentage-based routing.
+
+
+
+### Argo Rollouts Canary with NGINX Ingress + HPA
+
+This guide provides a complete, production-style Canary Rollout using **Argo Rollouts**, **NGINX Ingress** for precise traffic splitting, and **Horizontal Pod Autoscaler (HPA)**.
+
+#### Traffic Shift Strategy
+- Start with **20%** traffic to the new version (canary)
+- Increase to **50%** traffic to the new version
+- Finally promote to **100%** (full rollout)
+
+
+### Why Two Services?
+
+Even though both services (`demo-app-stable` and `demo-app-canary`) use the **same selector** (`app: demo-app`), Argo Rollouts makes them intelligent by dynamically managing the underlying ReplicaSets.
+
+- The Rollout creates **two ReplicaSets**:
+  - **Stable ReplicaSet** → runs the old (previous successful) version.
+  - **Canary ReplicaSet** → runs the new version.
+
+- Argo **automatically adds** a special label called `rollouts-pod-template-hash` to the pods of each ReplicaSet.  
+  This label is **different** for stable and canary pods.
+
+- Argo then **dynamically updates** the Service selectors behind the scenes:
+  - `demo-app-stable` Service only selects **stable pods**.
+  - `demo-app-canary` Service only selects **canary pods**.
+
+This smart behavior is handled automatically by the **Argo Rollouts controller** — you don’t need to manage it manually.
+
+### How Traffic Shifting Actually Works (with NGINX)
+
+1. Your main **Ingress** (`demo-app-ingress`) always points to the **stable Service**.
+
+2. When a canary rollout starts (e.g., `setWeight: 20`):
+   - Argo **automatically creates** a second Ingress (usually named `demo-app-ingress-canary`).
+   - Argo adds NGINX-specific annotations to this canary Ingress:
+```yaml
+     nginx.ingress.kubernetes.io/canary: "true"
+     nginx.ingress.kubernetes.io/canary-weight: "20"
+```
+
+NGINX Ingress Controller reads both Ingresses and splits traffic:
+- 80% of traffic → demo-app-stable Service → old pods
+- 20% of traffic → demo-app-canary Service → new pods
+
+3. When you do setWeight: 50:
+- Argo updates the canary Ingress annotation to canary-weight: "50".
+- NGINX now splits traffic 50% / 50%.
+
+4. When you do setWeight: 100:
+Argo promotes the canary → the new version becomes the stable ReplicaSet.
+- The old stable ReplicaSet is scaled down.
+- The canary Ingress is automatically cleaned up.
+- All traffic now goes through the stable Service (which now serves the new version).
+
+
+### Key Intelligent Things Argo Does for You
+
+- **Dynamic pod selection**  
+  Argo adds/removes the hash label and updates Service endpoints automatically.
+
+- **Automatic canary Ingress management**  
+  Creates, updates, and deletes the canary Ingress with correct weights.
+
+- **`dynamicStableScale: true` (recommended)**  
+  Keeps the stable ReplicaSet scaled properly so it can handle the remaining traffic percentage without overload.
+
+- **Background analysis**  
+  Continuously checks metrics while traffic is being shifted.
+
+- **Pause steps**  
+  Gives you safe windows to observe before increasing traffic.
+
+
+
+### Argo Rollouts - Blue-Green vs Canary & Analysis
 
 | Feature                | Blue-Green                          | Canary                                   |
 |------------------------|-------------------------------------|------------------------------------------|
