@@ -1,15 +1,39 @@
-<h2> Sync Phases and Sync Waves in Argo CD </h2>
+<h2> Sync Hooks, Sync Phases and Sync Waves in Argo CD </h2>
 
-Sync Phases and Sync Waves are two complementary mechanisms in Argo CD that give you fine-grained control over when and in what order resources (including hooks) are applied during a sync operation. They solve real-world problems where Kubernetes' default parallel/near-parallel apply fails due to dependencies, timing races, or external side-effects (e.g., CRD registration, database readiness, operator reconciliation).
+**Sync Hooks, Sync Phases, and Sync Waves** are three complementary mechanisms in Argo CD that provide fine-grained control over **when** and **in what order** resources are applied during a synchronization process.
 
-# Argo CD Sync Phases & Sync Waves – Complete Overview
+[References](https://argo-cd.readthedocs.io/en/release-2.9/user-guide/resource_hooks/)
 
-Sync Phases and Sync Waves are the two main mechanisms Argo CD uses to control **ordering**, **timing**, and **dependencies** during application synchronization.
+They address real-world challenges where Kubernetes' default parallel or near-parallel deployment model may fail due to dependencies, timing issues, or external side effects—such as CRD registration, database readiness, or operator reconciliation.
 
-## 1. Sync Phases
+Git Repository Structure
+```yaml
+k8s-app/
+├── deployment.yaml
+├── service.yaml
+├── hpa.yaml
+├── configmap.yaml
+├── db-migration-job.yaml   # 👈 Sync Hook
+├── smoke-test-job.yaml     # 👈 Sync Hook
+```
 
-Phases define the **major stages** of a sync operation.  
-They are mainly used for **resource hooks** (Jobs/Pods that run before, during, or after the main apply), but normal resources can also be assigned to phases.
+## 1. Argo CD Sync Hooks
+Argo CD Sync Hooks allow you to execute custom tasks at specific stages of the application deployment lifecycle. They are commonly used for database migrations, validations, notifications, and cleanup operations.
+
+They are commonly used for:
+- Database migrations
+- Smoke tests
+- Notifications
+- Cleanup tasks
+- Rollback alerts
+
+## 2. Sync Phases
+- Sync Phases control WHEN a resource runs in the overall sync lifecycle, not the order inside a phase. Argo CD has 3 main phases.
+
+1. PreSync   → DB migration job
+2. Sync      → App Deployment
+3. PostSync  → Smoke tests / validation
+
 
 | Phase       | Hook Annotation                              | When it executes                                      | Typical Use Cases                                      | Waits for previous phase? | Health check required? |
 |-------------|----------------------------------------------|-------------------------------------------------------|--------------------------------------------------------|----------------------------|------------------------|
@@ -19,6 +43,32 @@ They are mainly used for **resource hooks** (Jobs/Pods that run before, during, 
 | **Skip**    | `argocd.argoproj.io/hook: Skip`              | Never applied                                         | Temporarily disable broken/blocking resources          | —                          | —                      |
 | **SyncFail**| `argocd.argoproj.io/hook: SyncFail`          | If the overall sync fails                             | Failure alerts, rollback cleanup, notifications        | Only on failure            | —                      |
 
+
+Example: PostSync Phase (Run after deployment)
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smoke-test
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: curlimages/curl
+          command: ["sh", "-c", "echo Testing application..."]
+```
+**Note of this Job**
+
+- Run AFTER all Sync resources are deployed
+- Run only when deployment is successful
+- Delete Job automatically after successful execution
+- Keep cluster clean (no leftover test Jobs)
+
 **Key rules about phases:**
 - Executed **sequentially**: PreSync → Sync → PostSync
 - Argo CD **waits** for a phase to complete successfully before starting the next
@@ -26,15 +76,22 @@ They are mainly used for **resource hooks** (Jobs/Pods that run before, during, 
 - Normal resources without hook annotation → **Sync** phase
 - Phases control **lifecycle hooks**, not fine-grained resource ordering
 
-## 2. Sync Waves
+## 3. Argo CD Sync Waves
 
-Waves provide **intra-phase ordering** — they let you control the sequence **inside** a phase (most commonly inside **Sync** phase).
+- Sync Waves control the order of resource application within the same Sync Phase.
+- They provide intra-phase ordering, meaning you can decide which resources should be applied first, even if they are in the same Sync phase.
 
 ```yaml
 metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-10"   # any integer: negative, zero, positive
 ```
+
+**You use negative waves like -10 when something must exist before everything else, such as:**
+
+- Namespace
+- CRDs (Custom Resource Definitions)
+- Cluster-level prerequisites
 
 ## Argo CD Sync Waves – Numbering & Priority Explained
 

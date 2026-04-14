@@ -2,46 +2,66 @@
 
 **Create ServiceAccount,Token,and CA Certificate in External Cluster for ArgoCD Cluster**
 
-`kubectl create serviceaccount kubead-cluster-sa`
-
-`kubectl get clusterrole cluster-admin`
+1. Create the ServiceAccount in a Dedicated Namespace
+  
+```yaml
+kubectl create serviceaccount kubead-cluster-sa -n kube-system
+```
+Update the ClusterRoleBinding accordingly:
 
 ```bash
 kubectl create clusterrolebinding argocd-admin-binding \
   --clusterrole=cluster-admin \
-  --serviceaccount=default:kubead-cluster-sa
+  --serviceaccount=kube-system:kubead-cluster-sa
+```
+2. Verify Permissions, Your validation commands are correct. Update them with the namespace:
+```bash
+kubectl auth can-i create pods \
+  --as system:serviceaccount:kube-system:kubead-cluster-sa
+```
+```bash
+kubectl auth can-i delete pods \
+  --as system:serviceaccount:kube-system:kubead-cluster-sa
 ```
 
-`kubectl auth can-i create pod --as system:serviceaccount:default:kubead-cluster-sa`
+3. Generate the Token
+```bash
+kubectl create token kubead-cluster-sa -n kube-system
+```
 
-`kubectl auth can-i delete pod --as system:serviceaccount:default:kubead-cluster-sa`
-
-`kubectl create token kubead-cluster-sa`
-
-Get cluster Certificate.\
-`grep 'certificate-authority-data' ~/.kube/config | awk '{print $2}' | base64 --decode > ca.crt`
+4. Extract the Cluster CA Certificate (Recommended Method)
+```bash
+kubectl config view --raw --minify \
+  --flatten -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+  | base64 --decode > ca.crt
+```
 
 Encoding the contents of ca.crt into a single line of Base64.\
 `cat ca.crt | base64 | tr -d '\n'`
 
 
-## To add an external Kubernetes cluster to Argo CD
+5. Log in to your Argo CD instance using the CLI or the UI.
+```yaml
+argocd login localhost:8085 --username admin --password 4R89HMM9xY0QwVxO  --insecure
+```
 
-Log in to your Argo CD instance using the CLI or the UI.\
-`argocd login localhost:8085 --username admin --password 4R89HMM9xY0QwVxO  --insecure`
+6. Add Argo CD Cluster as Secret
 
-`vim add-cluster.yaml`
+```bash
+vim add-cluster.yaml
+```
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: external
+  name: external-cluster
+  namespace: argocd
   labels:
     argocd.argoproj.io/secret-type: cluster
 type: Opaque
 stringData:
-  name: external
+  name: external-cluster
   server: https://172.17.18.200:6443
   config: |
     {
@@ -53,6 +73,19 @@ stringData:
     }
 ```
 
-`kubectl apply -f add-cluster.yaml`
+```bash
+kubectl apply -f add-cluster.yaml
+```
+6. Verify Cluster Registration
+  
+```bash
+argocd cluster list
+```
 
-`argocd cluster list`
+## Alternative (Recommended) Method Using Argo CD CLI
+```bash
+argocd cluster add prod-cluster-context \
+  --kubeconfig /home/nasir/kubeconfigs/prod-kubeconfig.yaml \
+  --name prod-cluster \
+  --yes
+```

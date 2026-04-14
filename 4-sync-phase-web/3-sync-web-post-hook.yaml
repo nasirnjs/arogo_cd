@@ -1,0 +1,114 @@
+#1. Namespace creation
+#2. schema-migration   (-10)
+#3. data-migration     (-5)
+#4. Deployment (Sync phase)
+
+# 🟡 1. Namespace (must exist first)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-app
+---
+# 🟡 2. Schema Migration (PreSync - first job)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schema-migration
+  namespace: my-app
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-10"
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: schema
+          image: busybox
+          command:
+            - sh
+            - -c
+            - echo "Creating DB schema..."
+---
+# 🟡 3. Data Migration (depends on schema)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-migration
+  namespace: my-app
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: data
+          image: busybox
+          command:
+            - sh
+            - -c
+            - echo "Running data migration after schema..."
+---
+# 🟢 4. Deployment (main app)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: my-app
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest
+---
+# 🟢 5. Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-svc
+  namespace: my-app
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  selector:
+    app: my-app
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# 🔵 6. HPA (runs after app is up)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app-hpa
+  namespace: my-app
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

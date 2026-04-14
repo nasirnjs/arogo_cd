@@ -32,7 +32,7 @@ spec:
 
 ---
 # -------------------------------
-# Rollout (FIXED)
+# Rollout (FIXED - NO hardcoded version)
 # -------------------------------
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
@@ -49,11 +49,11 @@ spec:
     metadata:
       labels:
         app: demo-app
-        version: stable
+        # CRITICAL: DO NOT add version label here!
     spec:
       containers:
         - name: demo-app
-          image: nasirnjs/kinder-frontend:18
+          image: nasirnjs/kinder-frontend:12  # Current stable version
           ports:
             - containerPort: 80
   strategy:
@@ -66,6 +66,8 @@ spec:
         istio:
           virtualService:
             name: demo-app-vs
+            routes:
+            - primary
           destinationRule:
             name: demo-app-dr
             stableSubsetName: stable
@@ -76,7 +78,7 @@ spec:
         - setWeight: 50
         - pause: { duration: 2m }
         - setWeight: 100
-      scaleDownDelaySeconds: 30
+
 ---
 # -------------------------------
 # Horizontal Pod Autoscaler
@@ -155,12 +157,13 @@ spec:
   gateways:
     - demo-app-gateway
   http:
-    - route:
+    - name: primary
+      route:
         - destination:
             host: demo-app
             subset: stable
-          weight: 80
+          weight: 100
         - destination:
             host: demo-app
             subset: canary
-          weight: 20
+          weight: 0
