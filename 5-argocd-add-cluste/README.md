@@ -83,9 +83,20 @@ argocd cluster list
 ```
 
 ## Alternative (Recommended) Method Using Argo CD CLI
+
+Step 1: Verify the Kubernetes Context
 ```bash
-argocd cluster add prod-cluster-context \
-  --kubeconfig /home/nasir/kubeconfigs/prod-kubeconfig.yaml \
+kubectl config get-contexts --kubeconfig=/Users/technonext/.kube/config-nabil
+```
+
+Step 2: Add the Cluster to Argo CD
+```bash
+argocd cluster add kubernetes-admin@kubernetes \
+  --kubeconfig /Users/technonext/.kube/config-nabil \
   --name prod-cluster \
   --yes
+```
+Step 3: Verify the Cluster Registration
+```yaml
+argocd cluster list
 ```
