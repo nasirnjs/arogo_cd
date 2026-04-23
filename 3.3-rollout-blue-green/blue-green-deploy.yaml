@@ -1,0 +1,59 @@
+# Active Service (Live Traffic - Blue)
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-api-active-svc
+spec:
+  selector:
+    app: web-api
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+# Preview Service (New Version - Green)
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-api-preview-svc
+spec:
+  selector:
+    app: web-api
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+# Argo Rollout (Blue-Green, manual promotion)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: web-api-rollout
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: web-api
+
+  template:
+    metadata:
+      labels:
+        app: web-api
+    spec:
+      containers:
+      - name: web-api
+        image: my-repo/web-api:v1
+        ports:
+        - containerPort: 8080
+
+  strategy:
+    blueGreen:
+      activeService: web-api-active-svc
+      previewService: web-api-preview-svc
+
+      previewReplicaCount: 1         # run only 1 pod for testing
+      autoPromotionEnabled: false   # manual promotion required
+
+      scaleDownDelaySeconds: 30     # wait before removing old version
+      abortScaleDownDelaySeconds: 10  # delay if rollback happens
